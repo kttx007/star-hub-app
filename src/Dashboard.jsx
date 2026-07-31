@@ -1,9 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
+
+import AgnesStudio from './components/AgnesStudio.jsx';
 
 const COLORS = ['#3B82F6', '#F59E0B', '#10B981', '#EF4444'];
 
-const Dashboard = () => {
+const VIEWS = [
+  { id: 'cockpit', label: '驾驶舱' },
+  { id: 'studio', label: '创意工坊' },
+];
+
+const Cockpit = () => {
   // Mock data for prototype
   const stats = [
     { name: '待办战役', value: 3 },
@@ -18,21 +25,8 @@ const Dashboard = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-900">
-      {/* Header */}
-      <header className="mb-8 flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-800">星图中枢·乘法驾驶舱</h1>
-          <p className="text-slate-500">A1 总控台 | 2026 规划对齐版</p>
-        </div>
-        <div className="flex gap-4">
-          <button className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow-sm hover:bg-blue-700 transition">快速输入 INBOX</button>
-        </div>
-      </header>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
 
-      {/* Main Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
         {/* Metric Cards */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
           <h3 className="text-slate-400 text-sm font-medium mb-2">本周乘法系数</h3>
@@ -78,7 +72,44 @@ const Dashboard = () => {
             ))}
           </div>
         </div>
-      </div>
+    </div>
+  );
+};
+
+const Dashboard = () => {
+  const [view, setView] = useState('cockpit');
+
+  return (
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-900">
+      {/* Header */}
+      <header className="mb-8 flex flex-wrap gap-4 justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-800">星图中枢·乘法驾驶舱</h1>
+          <p className="text-slate-500">A1 总控台 | 2026 规划对齐版</p>
+        </div>
+        <div className="flex gap-4">
+          <button className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow-sm hover:bg-blue-700 transition">快速输入 INBOX</button>
+        </div>
+      </header>
+
+      {/* View switcher */}
+      <nav className="flex gap-1 mb-6 border-b border-slate-200">
+        {VIEWS.map(({ id, label }) => (
+          <button
+            key={id}
+            onClick={() => setView(id)}
+            className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 transition ${
+              view === id
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {view === 'cockpit' ? <Cockpit /> : <AgnesStudio />}
     </div>
   );
 };
