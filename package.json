@@ -19,6 +19,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "agnes": "node scripts/agnes.mjs",
+    "agnes:models": "node scripts/agnes.mjs models",
+    "agnes:image": "node scripts/agnes.mjs image",
+    "agnes:video": "node scripts/agnes.mjs video",
+    "agnes:selftest": "NO_PROXY=127.0.0.1,localhost node scripts/agnes-selftest.mjs"
   }
 }

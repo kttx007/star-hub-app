@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "agnes-ai-skill": {
+      "source": "jomeswang/agnes-ai-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "13205f374c8c8351789fbf925dc8ddfa48b66de8088550d72d6676592c96255b"
+    }
+  }
+}
