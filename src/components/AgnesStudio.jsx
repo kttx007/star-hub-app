@@ -4,9 +4,14 @@ import { Image as ImageIcon, Film, KeyRound, Loader2, Download, AlertCircle, Che
 import {
   createAgnesClient,
   DEFAULT_BASE_URL,
+  DEFAULT_IMAGE_MODEL,
+  DEFAULT_VIDEO_MODEL,
   IMAGE_MODELS,
-  IMAGE_SIZES,
-  VIDEO_SIZES,
+  VIDEO_MODELS,
+  VIDEO_RATIOS,
+  VIDEO_SECONDS_MAX,
+  VIDEO_SECONDS_MIN,
+  VIDEO_SECONDS_DEFAULT,
 } from '../lib/agnes.js';
 
 const KEY_STORAGE = 'agnes_api_key';
@@ -16,9 +21,7 @@ const KEY_STORAGE = 'agnes_api_key';
  * 开发态走 /agnes-api 代理绕开 CORS；生产态直连。
  */
 function useAgnesConfig() {
-  const [storedKey, setStoredKey] = useState(
-    () => localStorage.getItem(KEY_STORAGE) || '',
-  );
+  const [storedKey, setStoredKey] = useState(() => localStorage.getItem(KEY_STORAGE) || '');
 
   const envKey = import.meta.env.VITE_AGNES_API_KEY || '';
   const apiKey = storedKey || envKey;
@@ -51,9 +54,13 @@ function fileToDataUri(file) {
   });
 }
 
-function KeyPanel({ storedKey, saveKey, usingEnvKey }) {
+const field = 'w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white';
+const labelCls = 'text-xs text-slate-500';
+
+function KeyPanel({ storedKey, saveKey, usingEnvKey, client }) {
   const [draft, setDraft] = useState('');
   const [justSaved, setJustSaved] = useState(false);
+  const [probe, setProbe] = useState(null);
 
   const handleSave = () => {
     saveKey(draft);
@@ -62,11 +69,22 @@ function KeyPanel({ storedKey, saveKey, usingEnvKey }) {
     setTimeout(() => setJustSaved(false), 2000);
   };
 
+  // 模型清单是最轻的连通性探针：能列出来说明 key 和网络都通。
+  const checkModels = async () => {
+    setProbe({ busy: true });
+    try {
+      const { ids } = await client.listModels();
+      setProbe({ ok: true, ids });
+    } catch (e) {
+      setProbe({ ok: false, message: e.message });
+    }
+  };
+
   const masked = storedKey ? `${storedKey.slice(0, 6)}••••${storedKey.slice(-4)}` : null;
 
   return (
     <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 mb-6">
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         <KeyRound size={16} className="text-slate-400" />
         <h3 className="font-bold text-slate-700">Agnes API Key</h3>
         {masked && (
@@ -104,7 +122,23 @@ function KeyPanel({ storedKey, saveKey, usingEnvKey }) {
             清除
           </button>
         )}
+        {client && (
+          <button
+            onClick={checkModels}
+            disabled={probe?.busy}
+            className="px-4 py-2 rounded-lg text-sm border border-slate-200 text-slate-600 hover:bg-slate-50 transition disabled:opacity-40"
+          >
+            {probe?.busy ? '检测中…' : '连通性检测'}
+          </button>
+        )}
       </div>
+
+      {probe?.ok && (
+        <p className="text-xs text-green-600 mt-2 break-words">
+          ✓ 可用模型：{probe.ids.join('、') || '(网关未返回清单)'}
+        </p>
+      )}
+      {probe?.ok === false && <p className="text-xs text-red-600 mt-2 break-words">✗ {probe.message}</p>}
 
       <p className="text-xs text-slate-400 mt-2">
         仅存在本浏览器的 localStorage，不上传、不入库。在{' '}
@@ -132,27 +166,56 @@ function ErrorBox({ error }) {
   );
 }
 
+function ResultPane({ kind, src }) {
+  return (
+    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-center min-h-[320px]">
+      {src ? (
+        <div className="w-full">
+          {kind === 'image' ? (
+            <img src={src} alt="生成结果" className="w-full rounded-xl" />
+          ) : (
+            <video src={src} controls className="w-full rounded-xl" />
+          )}
+          <a
+            href={src}
+            download={`agnes-${Date.now()}.${kind === 'image' ? 'png' : 'mp4'}`}
+            className="mt-3 inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline"
+          >
+            <Download size={14} /> 下载
+          </a>
+        </div>
+      ) : (
+        <p className="text-slate-300 text-sm">结果将显示在这里</p>
+      )}
+    </div>
+  );
+}
+
 function ImageTab({ client }) {
   const [prompt, setPrompt] = useState('');
-  const [model, setModel] = useState(IMAGE_MODELS[0].id);
-  const [size, setSize] = useState(IMAGE_SIZES[0]);
+  const [model, setModel] = useState(DEFAULT_IMAGE_MODEL);
+  const spec = IMAGE_MODELS[model];
+  const [size, setSize] = useState(spec.defaultSize);
+  const [ratio, setRatio] = useState(spec.defaultRatio ?? '1:1');
   const [initImage, setInitImage] = useState(null);
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
+  // 换模型时参数形态可能从档位变像素，重置避免传出非法值。
+  useEffect(() => {
+    setSize(IMAGE_MODELS[model].defaultSize);
+    setRatio(IMAGE_MODELS[model].defaultRatio ?? '1:1');
+  }, [model]);
+
   const run = async () => {
-    setBusy(true);
-    setError(null);
-    setResult(null);
+    setBusy(true); setError(null); setResult(null);
     try {
-      const { url, b64 } = await client.generateImage({ prompt, model, size, initImage });
+      const { url, b64 } = await client.generateImage({
+        prompt, model, size, ratio: spec.ratios ? ratio : undefined, initImage,
+      });
       setResult(url || `data:image/png;base64,${b64}`);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
   };
 
   return (
@@ -166,36 +229,34 @@ function ImageTab({ client }) {
           className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
 
+        <label className={`block ${labelCls} mt-3`}>
+          模型
+          <select value={model} onChange={(e) => setModel(e.target.value)} className={field}>
+            {Object.entries(IMAGE_MODELS).map(([id, m]) => (
+              <option key={id} value={id}>{id}{m.legacy ? '（旧版）' : ''}</option>
+            ))}
+          </select>
+        </label>
+        <p className="text-[11px] text-slate-400 mt-1">{spec.label}</p>
+
         <div className="grid grid-cols-2 gap-3 mt-3">
-          <label className="text-xs text-slate-500">
-            模型
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white"
-            >
-              {IMAGE_MODELS.map((m) => (
-                <option key={m.id} value={m.id}>{m.id}</option>
-              ))}
+          <label className={labelCls}>
+            {spec.ratios ? '尺寸档位' : '尺寸'}
+            <select value={size} onChange={(e) => setSize(e.target.value)} className={field}>
+              {spec.sizes.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </label>
-          <label className="text-xs text-slate-500">
-            尺寸
-            <select
-              value={size}
-              onChange={(e) => setSize(e.target.value)}
-              className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white"
-            >
-              {IMAGE_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </label>
+          {spec.ratios && (
+            <label className={labelCls}>
+              比例
+              <select value={ratio} onChange={(e) => setRatio(e.target.value)} className={field}>
+                {spec.ratios.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </label>
+          )}
         </div>
 
-        <p className="text-[11px] text-slate-400 mt-2">
-          {IMAGE_MODELS.find((m) => m.id === model)?.label}
-        </p>
-
-        <label className="block text-xs text-slate-500 mt-3">
+        <label className={`block ${labelCls} mt-3`}>
           参考图（可选，走图生图）
           <input
             type="file"
@@ -219,29 +280,18 @@ function ImageTab({ client }) {
         <ErrorBox error={error} />
       </div>
 
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-center min-h-[320px]">
-        {result ? (
-          <div className="w-full">
-            <img src={result} alt="生成结果" className="w-full rounded-xl" />
-            <a
-              href={result}
-              download={`agnes-${Date.now()}.png`}
-              className="mt-3 inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline"
-            >
-              <Download size={14} /> 下载
-            </a>
-          </div>
-        ) : (
-          <p className="text-slate-300 text-sm">结果将显示在这里</p>
-        )}
-      </div>
+      <ResultPane kind="image" src={result} />
     </div>
   );
 }
 
 function VideoTab({ client }) {
   const [prompt, setPrompt] = useState('');
-  const [presetLabel, setPresetLabel] = useState(VIDEO_SIZES[0].label);
+  const [model, setModel] = useState(DEFAULT_VIDEO_MODEL);
+  const spec = VIDEO_MODELS[model];
+  const [size, setSize] = useState(spec.defaultSize);
+  const [seconds, setSeconds] = useState(VIDEO_SECONDS_DEFAULT);
+  const [aspectRatio, setAspectRatio] = useState('16:9');
   const [initImage, setInitImage] = useState(null);
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -249,25 +299,28 @@ function VideoTab({ client }) {
   const [error, setError] = useState(null);
   const abortRef = useRef(null);
 
+  useEffect(() => setSize(VIDEO_MODELS[model].defaultSize), [model]);
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const run = async () => {
-    const preset = VIDEO_SIZES.find((s) => s.label === presetLabel);
     const controller = new AbortController();
     abortRef.current = controller;
-
-    setBusy(true);
-    setError(null);
-    setResult(null);
+    setBusy(true); setError(null); setResult(null);
     setProgress('已提交任务，等待渲染…');
 
     try {
       const { url } = await client.generateVideo({
         prompt,
-        width: preset.width,
-        height: preset.height,
-        initImage,
+        model,
+        // 带参考图即走 reference 模式。
+        mode: initImage ? 'reference' : 'text',
+        seconds,
+        size: spec.legacy ? undefined : size,
+        aspectRatio,
+        images: initImage ? [initImage] : undefined,
         signal: controller.signal,
+        onRetry: ({ attempt, waitMs }) =>
+          setProgress(`队列已满，第 ${attempt} 次重试（等待 ${Math.round(waitMs / 1000)}s）…`),
         onProgress: ({ elapsedMs, state }) =>
           setProgress(`渲染中 ${Math.round(elapsedMs / 1000)}s · ${state}`),
       });
@@ -293,19 +346,51 @@ function VideoTab({ client }) {
           className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
 
-        <label className="block text-xs text-slate-500 mt-3">
-          画幅
-          <select
-            value={presetLabel}
-            onChange={(e) => setPresetLabel(e.target.value)}
-            className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white"
-          >
-            {VIDEO_SIZES.map((s) => <option key={s.label} value={s.label}>{s.label}</option>)}
+        <label className={`block ${labelCls} mt-3`}>
+          模型
+          <select value={model} onChange={(e) => setModel(e.target.value)} className={field}>
+            {Object.entries(VIDEO_MODELS).map(([id, m]) => (
+              <option key={id} value={id}>{id}{m.legacy ? '（旧版）' : ''}</option>
+            ))}
           </select>
         </label>
+        <p className="text-[11px] text-slate-400 mt-1">{spec.label}</p>
 
-        <label className="block text-xs text-slate-500 mt-3">
-          首帧图（可选，走图生视频）
+        {!spec.legacy && (
+          <div className="grid grid-cols-3 gap-3 mt-3">
+            <label className={labelCls}>
+              清晰度
+              <select
+                value={size}
+                onChange={(e) => setSize(e.target.value)}
+                disabled={spec.sizes.length === 1}
+                className={`${field} disabled:bg-slate-50 disabled:text-slate-400`}
+              >
+                {spec.sizes.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+            <label className={labelCls}>
+              时长 {seconds}s
+              <input
+                type="range"
+                min={VIDEO_SECONDS_MIN}
+                max={VIDEO_SECONDS_MAX}
+                value={seconds}
+                onChange={(e) => setSeconds(e.target.value)}
+                className="w-full mt-3 accent-blue-600"
+              />
+            </label>
+            <label className={labelCls}>
+              比例
+              <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} className={field}>
+                {VIDEO_RATIOS.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </label>
+          </div>
+        )}
+
+        <label className={`block ${labelCls} mt-3`}>
+          参考图（可选，自动切到 reference 模式）
           <input
             type="file"
             accept="image/*"
@@ -337,28 +422,13 @@ function VideoTab({ client }) {
 
         {progress && <p className="text-xs text-slate-400 mt-2">{progress}</p>}
         <p className="text-[11px] text-slate-400 mt-2">
-          异步任务，轮询间隔 12s（视频限速 5 RPM）。每日配额 500 秒。
+          异步任务，每 2s 轮询一次。队列满（503 video_queue_full）会自动退避重试。
         </p>
 
         <ErrorBox error={error} />
       </div>
 
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-center min-h-[320px]">
-        {result ? (
-          <div className="w-full">
-            <video src={result} controls className="w-full rounded-xl" />
-            <a
-              href={result}
-              download={`agnes-${Date.now()}.mp4`}
-              className="mt-3 inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline"
-            >
-              <Download size={14} /> 下载
-            </a>
-          </div>
-        ) : (
-          <p className="text-slate-300 text-sm">结果将显示在这里</p>
-        )}
-      </div>
+      <ResultPane kind="video" src={result} />
     </div>
   );
 }
@@ -374,7 +444,7 @@ export default function AgnesStudio() {
 
   return (
     <div>
-      <KeyPanel storedKey={storedKey} saveKey={saveKey} usingEnvKey={usingEnvKey} />
+      <KeyPanel storedKey={storedKey} saveKey={saveKey} usingEnvKey={usingEnvKey} client={client} />
 
       <div className="flex gap-2 mb-6">
         {TABS.map(({ id, label, Icon }) => (
